@@ -93,3 +93,31 @@ TEST(RoundRobin,SingleProcessAndIdle){
     EXPECT_THROW(runRoundRobin({{1,0,2,0}},0),invalid_argument);
     EXPECT_THROW(runRoundRobin({{1,0,2,0}},-1),invalid_argument);
 }
+
+TEST(MLFQ,DemotionsAndFCFSBottomQueue){
+    auto r=runMLFQ({{1,0,9,0},{2,0,8,0},{3,0,1,0}});
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{2,2,4},{3,4,5},
+        {1,5,9},{2,9,13},{1,13,16},{2,16,18}}));
+    EXPECT_EQ(r.completionOrder,(vector<int>{3,1,2}));
+    EXPECT_EQ(r.processes[0].waitingTime,7);
+    EXPECT_EQ(r.processes[1].responseTime,2);
+}
+
+TEST(MLFQ,PreemptsQ1AndPreservesBudget){
+    auto r=runMLFQ({{1,0,10,0},{2,3,1,0},{3,4,3,0}});
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,3},{2,3,4},{3,4,6},
+        {1,6,9},{3,9,10},{1,10,14}}));
+    EXPECT_EQ(r.processes[0].responseTime,0);
+}
+
+TEST(MLFQ,PreemptsQ2AndKeepsItsFCFSPosition){
+    auto r=runMLFQ({{1,0,10,0},{2,0,8,0},{3,13,1,0}});
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{2,2,4},{1,4,8},
+        {2,8,12},{1,12,13},{3,13,14},{1,14,17},{2,17,19}}));
+}
+
+TEST(MLFQ,ShortJobAndInitialIdle){
+    auto r=runMLFQ({{1,4,1,0},{2,4,2,0}});
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{-1,0,4},{1,4,5},{2,5,7}}));
+    EXPECT_EQ(r.completionOrder,(vector<int>{1,2}));
+}

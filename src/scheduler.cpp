@@ -129,29 +129,56 @@ SimulationResult runPriority(vector<Process> processes,bool preemptive){
     return runSelected(move(processes),Policy::Priority,preemptive?"Priority-P":"Priority-NP",preemptive);
 }
 
-SimulationResult runRoundRobin(vector<Process> processes,Time quantum){
+namespace{
+SimulationResult runQueued(vector<Process> processes,Time quantum,bool mlfq){
     if(quantum<=0)throw invalid_argument("quantum must be positive");
-    auto ans=prepare(move(processes),"RR");
+    auto ans=prepare(move(processes),mlfq?"MLFQ":"RR");
     auto order=arrivalOrder(ans.processes);
-    deque<int>q;
+    deque<int>q[3];
+    vector<Time>budget(ans.processes.size(),quantum);
     size_t pos=0;
     Time time=0;
     int prev=-1;
     while(ans.completionOrder.size()<ans.processes.size()){
-        enqueueArrivals(ans.processes,order,pos,time,q);
-        if(q.empty()){
+        enqueueArrivals(ans.processes,order,pos,time,q[0]);
+        int level=0;
+        while(level<3&&q[level].empty())level++;
+        if(level==3){
             addSlice(ans,-1,time,ans.processes[order[pos]].arrivalTime-time);
             prev=-1;
             continue;
         }
-        int ind=q.front();
-        q.pop_front();
+        int ind=q[level].front();
+        q[level].pop_front();
         if(prev!=-1&&prev!=ind)ans.contextSwitches++;
-        execute(ans,ind,time,min(quantum,ans.processes[ind].remainingTime));
-        enqueueArrivals(ans.processes,order,pos,time,q);
-        if(ans.processes[ind].remainingTime>0)q.push_back(ind);
+        Time duration=ans.processes[ind].remainingTime;
+        if(level<2)duration=min(duration,budget[ind]);
+        if(mlfq&&level>0&&pos<order.size()){
+            duration=min(duration,ans.processes[order[pos]].arrivalTime-time);
+        }
+        execute(ans,ind,time,duration);
+        if(level<2)budget[ind]-=duration;
+        enqueueArrivals(ans.processes,order,pos,time,q[0]);
+        if(ans.processes[ind].remainingTime>0){
+            if(level<2&&budget[ind]==0){
+                int next=mlfq?level+1:0;
+                budget[ind]=mlfq?4:quantum;
+                q[next].push_back(ind);
+            }else{
+                q[level].push_front(ind);
+            }
+        }
         prev=ind;
     }
     calculateMetrics(ans);
     return ans;
+}
+}
+
+SimulationResult runRoundRobin(vector<Process> processes,Time quantum){
+    return runQueued(move(processes),quantum,false);
+}
+
+SimulationResult runMLFQ(vector<Process> processes){
+    return runQueued(move(processes),2,true);
 }
