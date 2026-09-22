@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.20)
+project(SchedLab LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_executable(schedlab src/main.cpp)
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+    if(MINGW)
+        add_link_options(-static)
+        target_link_options(schedlab PRIVATE -static)
+    endif()
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    include(FetchContent)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.15.2
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(googletest)
+    add_executable(schedlab_tests tests/scheduler_tests.cpp)
+    target_link_libraries(schedlab_tests PRIVATE GTest::gtest_main)
+    include(GoogleTest)
+    gtest_discover_tests(schedlab_tests)
+    add_test(NAME cli_smoke COMMAND schedlab)
+endif()
