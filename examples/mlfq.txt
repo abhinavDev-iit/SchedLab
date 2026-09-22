@@ -1,0 +1,4 @@
+# pid arrival burst priority
+1 0 10 0
+2 0 8 0
+3 13 1 0
