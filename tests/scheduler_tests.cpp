@@ -1,5 +1,9 @@
 #include "scheduler.hpp"
+#include <algorithm>
 #include <gtest/gtest.h>
+#include <limits>
+#include <map>
+#include <random>
 #include <stdexcept>
 using namespace std;
 
@@ -174,5 +178,138 @@ TEST(Comparison,FreshWorkloadsAndConsistentResults){
     for(size_t i=0;i<results.size();i++){
         EXPECT_EQ(results[i].timeline,again[i].timeline);
         EXPECT_DOUBLE_EQ(results[i].averageResponseTime,again[i].averageResponseTime);
+    }
+}
+
+TEST(AllSchedulers,SingleProcessAndIdleGap){
+    for(auto &r:compareSchedulers({{7,3,7,0},{2,20,1,0}},1,9)){
+        SCOPED_TRACE(r.algorithmName);
+        EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{-1,0,3},{7,3,10},{-1,10,20},{2,20,21}}));
+        EXPECT_EQ(r.contextSwitches,0);
+        EXPECT_DOUBLE_EQ(r.averageWaitingTime,0);
+        EXPECT_DOUBLE_EQ(r.averageResponseTime,0);
+        EXPECT_DOUBLE_EQ(r.averageTurnaroundTime,4);
+        EXPECT_DOUBLE_EQ(r.cpuUtilization,8.0/21*100);
+    }
+}
+
+TEST(AllSchedulers,ZeroCostStillCountsProcessChanges){
+    for(auto &r:compareSchedulers({{2,0,1,0},{1,0,1,0}})){
+        SCOPED_TRACE(r.algorithmName);
+        EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,1},{2,1,2}}));
+        EXPECT_EQ(r.contextSwitches,1);
+        EXPECT_DOUBLE_EQ(r.cpuUtilization,100);
+    }
+}
+
+TEST(ContextSwitch,NonPreemptiveDispatchIncludesOverheadArrivals){
+    auto r=runSJF({{1,0,2,0},{2,0,5,0},{3,3,1,0}},2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{-2,2,4},{3,4,5},{-2,5,7},{2,7,12}}));
+    auto p=runPriority({{1,0,2,0},{2,0,5,2},{3,3,1,1}},false,2);
+    EXPECT_EQ(p.timeline,r.timeline);
+}
+
+TEST(ContextSwitch,PreemptivePriorityArrivalDuringOverhead){
+    auto r=runPriority({{1,0,4,3},{2,1,2,2},{3,2,1,1}},true,2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,1},{-2,1,3},{3,3,4},
+        {-2,4,6},{2,6,8},{-2,8,10},{1,10,13}}));
+    EXPECT_EQ(r.processes[1].responseTime,5);
+    EXPECT_EQ(r.processes[0].waitingTime,9);
+}
+
+TEST(MLFQ,ArrivalsExactlyAtDemotionBoundaries){
+    auto q0=runMLFQ({{1,0,5,0},{2,2,1,0}});
+    EXPECT_EQ(q0.timeline,(vector<ExecutionSlice>{{1,0,2},{2,2,3},{1,3,6}}));
+    auto q1=runMLFQ({{1,0,8,0},{2,6,1,0}});
+    EXPECT_EQ(q1.timeline,(vector<ExecutionSlice>{{1,0,6},{2,6,7},{1,7,9}}));
+}
+
+TEST(Validation,TimeOverflowThrowsInsteadOfWrapping){
+    Time limit=numeric_limits<Time>::max();
+    vector<Process>p={{1,limit,1,0}};
+    EXPECT_THROW(runFCFS(p),overflow_error);
+    EXPECT_THROW(runSJF(p),overflow_error);
+    EXPECT_THROW(runSRTF(p),overflow_error);
+    EXPECT_THROW(runPriority(p),overflow_error);
+    EXPECT_THROW(runPriority(p,true),overflow_error);
+    EXPECT_THROW(runRoundRobin(p),overflow_error);
+    EXPECT_THROW(runMLFQ(p),overflow_error);
+    EXPECT_THROW(runFCFS({{1,0,2,0},{2,0,1,0}},limit),overflow_error);
+    EXPECT_EQ(runFCFS({{1,limit-1,1,0}}).processes[0].completionTime,limit);
+}
+
+TEST(AllSchedulers,RandomWorkloadsConserveCPUTimeAndMetrics){
+    mt19937 gen(2026);
+    for(int test=0;test<100;test++){
+        vector<Process>p;
+        int n=1+gen()%8;
+        Time cost=gen()%4,quantum=1+gen()%5;
+        for(int i=0;i<n;i++){
+            p.push_back({i,static_cast<Time>(gen()%20),1+static_cast<Time>(gen()%12),static_cast<int>(gen()%7)-3});
+        }
+        auto results=compareSchedulers(p,quantum,cost);
+        shuffle(p.begin(),p.end(),gen);
+        auto shuffled=compareSchedulers(p,quantum,cost);
+        for(size_t i=0;i<results.size();i++){
+            auto &r=results[i];
+            SCOPED_TRACE(to_string(test)+" "+r.algorithmName);
+            EXPECT_EQ(r.timeline,shuffled[i].timeline);
+            map<int,Time>ran,first,last;
+            Time time=0,busy=0,overhead=0,switches=0;
+            int prev=-1;
+            for(auto &s:r.timeline){
+                ASSERT_EQ(s.startTime,time);
+                ASSERT_GT(s.endTime,s.startTime);
+                Time duration=s.endTime-s.startTime;
+                time=s.endTime;
+                if(s.pid==-1){
+                    for(auto &it:r.processes){
+                        EXPECT_TRUE(ran[it.pid]==it.burstTime||it.arrivalTime>=s.endTime);
+                    }
+                    prev=-1;
+                }else if(s.pid==-2){
+                    EXPECT_EQ(duration,cost);
+                    EXPECT_NE(prev,-1);
+                    overhead+=duration;
+                }else{
+                    ASSERT_GE(s.pid,0);
+                    ASSERT_LT(s.pid,n);
+                    if(prev!=-1&&prev!=s.pid)switches++;
+                    prev=s.pid;
+                    if(!first.count(s.pid))first[s.pid]=s.startTime;
+                    last[s.pid]=s.endTime;
+                    ran[s.pid]+=duration;
+                    busy+=duration;
+                }
+            }
+            EXPECT_EQ(switches,r.contextSwitches);
+            EXPECT_EQ(overhead,cost*switches);
+            double wt=0,tat=0,rt=0;
+            vector<pair<Time,int>>finished;
+            for(auto &it:r.processes){
+                EXPECT_EQ(ran[it.pid],it.burstTime);
+                EXPECT_GE(first[it.pid],it.arrivalTime);
+                EXPECT_EQ(it.firstRunTime,first[it.pid]);
+                EXPECT_EQ(it.completionTime,last[it.pid]);
+                EXPECT_EQ(it.remainingTime,0);
+                EXPECT_EQ(it.turnaroundTime,last[it.pid]-it.arrivalTime);
+                EXPECT_EQ(it.waitingTime,last[it.pid]-it.arrivalTime-ran[it.pid]);
+                EXPECT_EQ(it.responseTime,first[it.pid]-it.arrivalTime);
+                EXPECT_GE(it.waitingTime,it.responseTime);
+                wt+=it.waitingTime;
+                tat+=it.turnaroundTime;
+                rt+=it.responseTime;
+                finished.push_back({last[it.pid],it.pid});
+            }
+            sort(finished.begin(),finished.end());
+            vector<int>order;
+            for(auto &it:finished)order.push_back(it.second);
+            EXPECT_EQ(r.completionOrder,order);
+            EXPECT_DOUBLE_EQ(r.averageWaitingTime,wt/n);
+            EXPECT_DOUBLE_EQ(r.averageTurnaroundTime,tat/n);
+            EXPECT_DOUBLE_EQ(r.averageResponseTime,rt/n);
+            EXPECT_DOUBLE_EQ(r.throughput,static_cast<double>(n)/time);
+            EXPECT_DOUBLE_EQ(r.cpuUtilization,static_cast<double>(busy)/time*100);
+        }
     }
 }
