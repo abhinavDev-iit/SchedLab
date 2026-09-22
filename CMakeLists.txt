@@ -13,7 +13,7 @@ else()
     endif()
 endif()
 
-add_library(schedlab_core src/metrics.cpp)
+add_library(schedlab_core src/metrics.cpp src/scheduler.cpp)
 target_include_directories(schedlab_core PUBLIC include)
 add_executable(schedlab src/main.cpp)
 target_link_libraries(schedlab PRIVATE schedlab_core)
