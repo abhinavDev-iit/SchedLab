@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     add_compile_options(/W4)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
@@ -13,7 +14,7 @@ else()
     endif()
 endif()
 
-add_library(schedlab_core src/metrics.cpp src/scheduler.cpp src/cli.cpp)
+add_library(schedlab_core STATIC src/metrics.cpp src/scheduler.cpp src/cli.cpp)
 target_include_directories(schedlab_core PUBLIC include)
 add_executable(schedlab src/main.cpp)
 target_link_libraries(schedlab PRIVATE schedlab_core)
@@ -21,7 +22,8 @@ target_link_libraries(schedlab PRIVATE schedlab_core)
 include(CTest)
 if(BUILD_TESTING)
     include(FetchContent)
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt OFF CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG v1.15.2
