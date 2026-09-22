@@ -7,7 +7,7 @@
 using namespace std;
 
 namespace{
-enum class Policy{FCFS,SJF};
+enum class Policy{FCFS,SJF,SRTF,Priority};
 
 SimulationResult prepare(vector<Process> processes,const string &name){
     validateWorkload(processes);
@@ -51,6 +51,12 @@ void execute(SimulationResult &ans,int ind,Time &time,Time duration){
 }
 
 bool better(const Process &a,const Process &b,Policy policy){
+    if(policy==Policy::SRTF&&a.remainingTime!=b.remainingTime){
+        return a.remainingTime<b.remainingTime;
+    }
+    if(policy==Policy::Priority&&a.priority!=b.priority){
+        return a.priority<b.priority;
+    }
     if(policy==Policy::SJF&&a.burstTime!=b.burstTime){
         return a.burstTime<b.burstTime;
     }
@@ -58,7 +64,7 @@ bool better(const Process &a,const Process &b,Policy policy){
     return a.pid<b.pid;
 }
 
-SimulationResult runSelected(vector<Process> processes,Policy policy,const string &name){
+SimulationResult runSelected(vector<Process> processes,Policy policy,const string &name,bool preemptive=false){
     auto ans=prepare(move(processes),name);
     Time time=0;
     int prev=-1;
@@ -80,7 +86,9 @@ SimulationResult runSelected(vector<Process> processes,Policy policy,const strin
             continue;
         }
         if(prev!=-1&&prev!=ind)ans.contextSwitches++;
-        execute(ans,ind,time,ans.processes[ind].remainingTime);
+        Time duration=ans.processes[ind].remainingTime;
+        if(preemptive&&next>time)duration=min(duration,next-time);
+        execute(ans,ind,time,duration);
         prev=ind;
     }
     calculateMetrics(ans);
@@ -94,4 +102,12 @@ SimulationResult runFCFS(vector<Process> processes){
 
 SimulationResult runSJF(vector<Process> processes){
     return runSelected(move(processes),Policy::SJF,"SJF");
+}
+
+SimulationResult runSRTF(vector<Process> processes){
+    return runSelected(move(processes),Policy::SRTF,"SRTF",true);
+}
+
+SimulationResult runPriority(vector<Process> processes,bool preemptive){
+    return runSelected(move(processes),Policy::Priority,preemptive?"Priority-P":"Priority-NP",preemptive);
 }
