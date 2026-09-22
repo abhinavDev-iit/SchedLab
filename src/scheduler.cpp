@@ -201,3 +201,11 @@ SimulationResult runRoundRobin(vector<Process> processes,Time quantum,Time conte
 SimulationResult runMLFQ(vector<Process> processes,Time contextSwitchCost){
     return runQueued(move(processes),2,true,contextSwitchCost);
 }
+
+vector<SimulationResult> compareSchedulers(const vector<Process> &processes,Time quantum,Time contextSwitchCost){
+    if(quantum<=0)throw invalid_argument("quantum must be positive");
+    return {runFCFS(processes,contextSwitchCost),runSJF(processes,contextSwitchCost),
+        runSRTF(processes,contextSwitchCost),runPriority(processes,false,contextSwitchCost),
+        runPriority(processes,true,contextSwitchCost),runRoundRobin(processes,quantum,contextSwitchCost),
+        runMLFQ(processes,contextSwitchCost)};
+}

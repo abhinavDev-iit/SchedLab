@@ -154,3 +154,25 @@ TEST(ContextSwitch,MLFQArrivalDuringSwitchToLowerQueue){
         {-2,5,7},{3,7,8},{-2,8,10},{1,10,16}}));
     EXPECT_EQ(r.contextSwitches,3);
 }
+
+TEST(Comparison,FreshWorkloadsAndConsistentResults){
+    vector<Process>p={{1,0,8,3},{2,1,4,1},{3,2,1,2}};
+    auto results=compareSchedulers(p,3,1);
+    ASSERT_EQ(results.size(),7u);
+    EXPECT_EQ(results[0].timeline,runFCFS(p,1).timeline);
+    EXPECT_EQ(results[1].timeline,runSJF(p,1).timeline);
+    EXPECT_EQ(results[2].timeline,runSRTF(p,1).timeline);
+    EXPECT_EQ(results[3].timeline,runPriority(p,false,1).timeline);
+    EXPECT_EQ(results[4].timeline,runPriority(p,true,1).timeline);
+    EXPECT_EQ(results[5].timeline,runRoundRobin(p,3,1).timeline);
+    EXPECT_EQ(results[6].timeline,runMLFQ(p,1).timeline);
+    for(auto &it:p){
+        EXPECT_EQ(it.firstRunTime,-1);
+        EXPECT_EQ(it.remainingTime,0);
+    }
+    auto again=compareSchedulers(results[0].processes,3,1);
+    for(size_t i=0;i<results.size();i++){
+        EXPECT_EQ(results[i].timeline,again[i].timeline);
+        EXPECT_DOUBLE_EQ(results[i].averageResponseTime,again[i].averageResponseTime);
+    }
+}

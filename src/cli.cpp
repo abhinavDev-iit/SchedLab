@@ -44,6 +44,7 @@ void printResult(const SimulationResult &r,ostream &out){
 void printHelp(ostream &out){
     out<<"SchedLab - C++20 CPU scheduling simulator\n"
        <<"Usage: schedlab --algorithm NAME --input FILE [options]\n"
+       <<"       schedlab --compare --input FILE [--quantum N] [--context-switch N]\n"
        <<"Algorithms: fcfs, sjf, srtf, priority, rr, mlfq\n"
        <<"Options:\n"
        <<"  --preemptive       Preemptive priority scheduling\n"
@@ -94,13 +95,15 @@ int runCLI(const vector<string> &args,ostream &out,ostream &err){
         }
         string algorithm,file;
         Time quantum=2,cost=0;
-        bool preemptive=false;
+        bool preemptive=false,compare=false;
         set<string>seen;
         for(size_t i=0;i<args.size();i++){
             const string &arg=args[i];
             if(!seen.insert(arg).second)throw invalid_argument("duplicate option: "+arg);
             if(arg=="--preemptive"){
                 preemptive=true;
+            }else if(arg=="--compare"){
+                compare=true;
             }else if(arg=="--algorithm"||arg=="--input"||arg=="--quantum"||arg=="--context-switch"){
                 if(i+1==args.size())throw invalid_argument("missing value for "+arg);
                 const string &value=args[++i];
@@ -112,18 +115,31 @@ int runCLI(const vector<string> &args,ostream &out,ostream &err){
                 throw invalid_argument("unknown option: "+arg);
             }
         }
-        if(algorithm.empty())throw invalid_argument("--algorithm is required");
-        if(algorithm!="fcfs"&&algorithm!="sjf"&&algorithm!="srtf"&&algorithm!="priority"&&algorithm!="rr"&&algorithm!="mlfq"){
+        if(compare&&seen.count("--algorithm"))throw invalid_argument("choose either --compare or --algorithm");
+        if(!compare&&algorithm.empty())throw invalid_argument("--algorithm or --compare is required");
+        if(!compare&&algorithm!="fcfs"&&algorithm!="sjf"&&algorithm!="srtf"&&algorithm!="priority"&&algorithm!="rr"&&algorithm!="mlfq"){
             throw invalid_argument("unknown algorithm: "+algorithm);
         }
         if(file.empty())throw invalid_argument("--input is required");
         if(preemptive&&algorithm!="priority")throw invalid_argument("--preemptive requires --algorithm priority");
-        if(seen.count("--quantum")&&algorithm!="rr")throw invalid_argument("--quantum requires --algorithm rr");
+        if(seen.count("--quantum")&&algorithm!="rr"&&!compare)throw invalid_argument("--quantum requires --algorithm rr or --compare");
         if(quantum<=0)throw invalid_argument("quantum must be positive");
         if(cost<0)throw invalid_argument("context switch cost must be nonnegative");
         ifstream input(file);
         if(!input)throw runtime_error("cannot open workload: "+file);
         auto processes=readWorkload(input);
+        if(compare){
+            auto results=compareSchedulers(processes,quantum,cost);
+            out<<left<<setw(15)<<"Algorithm"<<right<<setw(12)<<"Avg WT"<<setw(12)<<"Avg TAT"
+               <<setw(12)<<"Avg RT"<<setw(12)<<"CPU %"<<setw(14)<<"Throughput"<<setw(12)<<"Switches"<<"\n";
+            for(auto &r:results){
+                out<<left<<setw(15)<<r.algorithmName<<right<<fixed<<setprecision(3)
+                   <<setw(12)<<r.averageWaitingTime<<setw(12)<<r.averageTurnaroundTime
+                   <<setw(12)<<r.averageResponseTime<<setw(12)<<r.cpuUtilization
+                   <<setw(14)<<r.throughput<<setw(12)<<r.contextSwitches<<"\n";
+            }
+            return 0;
+        }
         SimulationResult r;
         if(algorithm=="fcfs")r=runFCFS(processes,cost);
         else if(algorithm=="sjf")r=runSJF(processes,cost);
