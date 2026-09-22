@@ -1,6 +1,7 @@
 #include "scheduler.hpp"
 #include "metrics.hpp"
 #include <algorithm>
+#include <deque>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -64,6 +65,22 @@ bool better(const Process &a,const Process &b,Policy policy){
     return a.pid<b.pid;
 }
 
+vector<int> arrivalOrder(const vector<Process> &processes){
+    vector<int>order;
+    for(int i=0;i<static_cast<int>(processes.size());i++)order.push_back(i);
+    sort(order.begin(),order.end(),[&](int a,int b){
+        return better(processes[a],processes[b],Policy::FCFS);
+    });
+    return order;
+}
+
+void enqueueArrivals(const vector<Process> &processes,const vector<int> &order,
+                     size_t &pos,Time time,deque<int> &q){
+    while(pos<order.size()&&processes[order[pos]].arrivalTime<=time){
+        q.push_back(order[pos++]);
+    }
+}
+
 SimulationResult runSelected(vector<Process> processes,Policy policy,const string &name,bool preemptive=false){
     auto ans=prepare(move(processes),name);
     Time time=0;
@@ -110,4 +127,31 @@ SimulationResult runSRTF(vector<Process> processes){
 
 SimulationResult runPriority(vector<Process> processes,bool preemptive){
     return runSelected(move(processes),Policy::Priority,preemptive?"Priority-P":"Priority-NP",preemptive);
+}
+
+SimulationResult runRoundRobin(vector<Process> processes,Time quantum){
+    if(quantum<=0)throw invalid_argument("quantum must be positive");
+    auto ans=prepare(move(processes),"RR");
+    auto order=arrivalOrder(ans.processes);
+    deque<int>q;
+    size_t pos=0;
+    Time time=0;
+    int prev=-1;
+    while(ans.completionOrder.size()<ans.processes.size()){
+        enqueueArrivals(ans.processes,order,pos,time,q);
+        if(q.empty()){
+            addSlice(ans,-1,time,ans.processes[order[pos]].arrivalTime-time);
+            prev=-1;
+            continue;
+        }
+        int ind=q.front();
+        q.pop_front();
+        if(prev!=-1&&prev!=ind)ans.contextSwitches++;
+        execute(ans,ind,time,min(quantum,ans.processes[ind].remainingTime));
+        enqueueArrivals(ans.processes,order,pos,time,q);
+        if(ans.processes[ind].remainingTime>0)q.push_back(ind);
+        prev=ind;
+    }
+    calculateMetrics(ans);
+    return ans;
 }

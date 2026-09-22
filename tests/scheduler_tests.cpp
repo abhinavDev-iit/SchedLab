@@ -1,5 +1,6 @@
 #include "scheduler.hpp"
 #include <gtest/gtest.h>
+#include <stdexcept>
 using namespace std;
 
 TEST(FCFS,ArrivalOrderAndMetrics){
@@ -63,4 +64,32 @@ TEST(Priority,PreemptiveAndEqualPriority){
     EXPECT_EQ(r.processes[0].responseTime,0);
     EXPECT_EQ(r.processes[0].waitingTime,4);
     EXPECT_EQ(runPriority({{2,0,2,1},{1,0,2,1}},true).completionOrder,(vector<int>{1,2}));
+}
+
+TEST(RoundRobin,ArrivalsDuringAndAtQuantumBoundary){
+    auto r=runRoundRobin({{1,0,5,0},{2,1,2,0},{3,2,1,0}},2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{2,2,4},{3,4,5},{1,5,8}}));
+    EXPECT_EQ(r.completionOrder,(vector<int>{2,3,1}));
+    EXPECT_EQ(r.processes[0].waitingTime,3);
+    EXPECT_EQ(r.processes[1].responseTime,1);
+    EXPECT_EQ(r.contextSwitches,3);
+}
+
+TEST(RoundRobin,QuantumOneAndSameArrivalTie){
+    auto r=runRoundRobin({{2,0,2,0},{1,0,2,0}},1);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,1},{2,1,2},{1,2,3},{2,3,4}}));
+}
+
+TEST(RoundRobin,LargeQuantum){
+    auto r=runRoundRobin({{1,0,3,0},{2,1,2,0}},20);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,3},{2,3,5}}));
+}
+
+TEST(RoundRobin,SingleProcessAndIdle){
+    auto r=runRoundRobin({{1,3,7,0}},2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{-1,0,3},{1,3,10}}));
+    EXPECT_EQ(r.contextSwitches,0);
+    EXPECT_EQ(r.processes[0].waitingTime,0);
+    EXPECT_THROW(runRoundRobin({{1,0,2,0}},0),invalid_argument);
+    EXPECT_THROW(runRoundRobin({{1,0,2,0}},-1),invalid_argument);
 }
