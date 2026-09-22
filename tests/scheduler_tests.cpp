@@ -121,3 +121,36 @@ TEST(MLFQ,ShortJobAndInitialIdle){
     EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{-1,0,4},{1,4,5},{2,5,7}}));
     EXPECT_EQ(r.completionOrder,(vector<int>{1,2}));
 }
+
+TEST(ContextSwitch,IdleAndSameProcessAreFree){
+    auto r=runFCFS({{1,2,1,0},{2,7,1,0}},5);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{-1,0,2},{1,2,3},{-1,3,7},{2,7,8}}));
+    EXPECT_EQ(r.contextSwitches,0);
+    auto rr=runRoundRobin({{1,0,5,0}},1,5);
+    EXPECT_EQ(rr.timeline,(vector<ExecutionSlice>{{1,0,5}}));
+    EXPECT_EQ(rr.contextSwitches,0);
+    EXPECT_EQ(runMLFQ({{1,0,10,0}},5).contextSwitches,0);
+    EXPECT_THROW(runFCFS({{1,0,1,0}},-1),invalid_argument);
+}
+
+TEST(ContextSwitch,ReselectsAfterOverhead){
+    auto r=runSRTF({{1,0,8,0},{2,1,4,0},{3,2,1,0}},2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,1},{-2,1,3},{3,3,4},
+        {-2,4,6},{2,6,10},{-2,10,12},{1,12,19}}));
+    EXPECT_EQ(r.contextSwitches,3);
+    EXPECT_EQ(r.processes[1].firstRunTime,6);
+    EXPECT_EQ(r.processes[0].responseTime,0);
+}
+
+TEST(ContextSwitch,RoundRobinEnqueuesDuringOverhead){
+    auto r=runRoundRobin({{1,0,3,0},{2,1,1,0},{3,3,1,0}},2,2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{-2,2,4},{2,4,5},
+        {-2,5,7},{1,7,8},{-2,8,10},{3,10,11}}));
+}
+
+TEST(ContextSwitch,MLFQArrivalDuringSwitchToLowerQueue){
+    auto r=runMLFQ({{1,0,8,0},{2,0,1,0},{3,6,1,0}},2);
+    EXPECT_EQ(r.timeline,(vector<ExecutionSlice>{{1,0,2},{-2,2,4},{2,4,5},
+        {-2,5,7},{3,7,8},{-2,8,10},{1,10,16}}));
+    EXPECT_EQ(r.contextSwitches,3);
+}

@@ -1,4 +1,5 @@
 #include "metrics.hpp"
+#include "scheduler.hpp"
 #include <gtest/gtest.h>
 #include <stdexcept>
 
@@ -31,4 +32,19 @@ TEST(Metrics,HandCalculatedWithIdle){
     EXPECT_DOUBLE_EQ(r.cpuUtilization,5.0/7*100);
     calculateMetrics(r);
     EXPECT_DOUBLE_EQ(r.averageWaitingTime,1);
+}
+
+TEST(Metrics,ContextOverheadAffectsAllMetrics){
+    auto r=runFCFS({{1,2,3,0},{2,3,2,0}},1);
+    EXPECT_EQ(r.timeline,(std::vector<ExecutionSlice>{{-1,0,2},{1,2,5},{-2,5,6},{2,6,8}}));
+    EXPECT_EQ(r.processes[1].completionTime,8);
+    EXPECT_EQ(r.processes[1].turnaroundTime,5);
+    EXPECT_EQ(r.processes[1].waitingTime,3);
+    EXPECT_EQ(r.processes[1].responseTime,3);
+    EXPECT_DOUBLE_EQ(r.averageWaitingTime,1.5);
+    EXPECT_DOUBLE_EQ(r.averageTurnaroundTime,4);
+    EXPECT_DOUBLE_EQ(r.averageResponseTime,1.5);
+    EXPECT_DOUBLE_EQ(r.throughput,0.25);
+    EXPECT_DOUBLE_EQ(r.cpuUtilization,62.5);
+    EXPECT_EQ(r.contextSwitches,1);
 }

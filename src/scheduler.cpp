@@ -10,7 +10,8 @@ using namespace std;
 namespace{
 enum class Policy{FCFS,SJF,SRTF,Priority};
 
-SimulationResult prepare(vector<Process> processes,const string &name){
+SimulationResult prepare(vector<Process> processes,const string &name,Time cost){
+    if(cost<0)throw invalid_argument("context switch cost must be nonnegative");
     validateWorkload(processes);
     for(auto &p:processes){
         p.remainingTime=p.burstTime;
@@ -51,6 +52,12 @@ void execute(SimulationResult &ans,int ind,Time &time,Time duration){
     }
 }
 
+void switchProcess(SimulationResult &ans,int prev,int ind,Time &time,Time cost){
+    if(prev==-1||prev==ind)return;
+    ans.contextSwitches++;
+    addSlice(ans,-2,time,cost);
+}
+
 bool better(const Process &a,const Process &b,Policy policy){
     if(policy==Policy::SRTF&&a.remainingTime!=b.remainingTime){
         return a.remainingTime<b.remainingTime;
@@ -81,28 +88,36 @@ void enqueueArrivals(const vector<Process> &processes,const vector<int> &order,
     }
 }
 
-SimulationResult runSelected(vector<Process> processes,Policy policy,const string &name,bool preemptive=false){
-    auto ans=prepare(move(processes),name);
+int selectReady(const vector<Process> &processes,Time time,Policy policy,Time &next){
+    int ind=-1;
+    next=numeric_limits<Time>::max();
+    for(int i=0;i<static_cast<int>(processes.size());i++){
+        auto &p=processes[i];
+        if(p.remainingTime==0)continue;
+        if(p.arrivalTime>time){
+            next=min(next,p.arrivalTime);
+        }else if(ind==-1||better(p,processes[ind],policy)){
+            ind=i;
+        }
+    }
+    return ind;
+}
+
+SimulationResult runSelected(vector<Process> processes,Policy policy,const string &name,Time cost,bool preemptive=false){
+    auto ans=prepare(move(processes),name,cost);
     Time time=0;
     int prev=-1;
     while(ans.completionOrder.size()<ans.processes.size()){
-        int ind=-1;
-        Time next=numeric_limits<Time>::max();
-        for(int i=0;i<static_cast<int>(ans.processes.size());i++){
-            auto &p=ans.processes[i];
-            if(p.remainingTime==0)continue;
-            if(p.arrivalTime>time){
-                next=min(next,p.arrivalTime);
-            }else if(ind==-1||better(p,ans.processes[ind],policy)){
-                ind=i;
-            }
-        }
+        Time next;
+        int ind=selectReady(ans.processes,time,policy,next);
         if(ind==-1){
             addSlice(ans,-1,time,next-time);
             prev=-1;
             continue;
         }
-        if(prev!=-1&&prev!=ind)ans.contextSwitches++;
+        switchProcess(ans,prev,ind,time,cost);
+        // Arrivals during overhead participate in the final dispatch decision.
+        ind=selectReady(ans.processes,time,policy,next);
         Time duration=ans.processes[ind].remainingTime;
         if(preemptive&&next>time)duration=min(duration,next-time);
         execute(ans,ind,time,duration);
@@ -113,26 +128,26 @@ SimulationResult runSelected(vector<Process> processes,Policy policy,const strin
 }
 }
 
-SimulationResult runFCFS(vector<Process> processes){
-    return runSelected(move(processes),Policy::FCFS,"FCFS");
+SimulationResult runFCFS(vector<Process> processes,Time contextSwitchCost){
+    return runSelected(move(processes),Policy::FCFS,"FCFS",contextSwitchCost);
 }
 
-SimulationResult runSJF(vector<Process> processes){
-    return runSelected(move(processes),Policy::SJF,"SJF");
+SimulationResult runSJF(vector<Process> processes,Time contextSwitchCost){
+    return runSelected(move(processes),Policy::SJF,"SJF",contextSwitchCost);
 }
 
-SimulationResult runSRTF(vector<Process> processes){
-    return runSelected(move(processes),Policy::SRTF,"SRTF",true);
+SimulationResult runSRTF(vector<Process> processes,Time contextSwitchCost){
+    return runSelected(move(processes),Policy::SRTF,"SRTF",contextSwitchCost,true);
 }
 
-SimulationResult runPriority(vector<Process> processes,bool preemptive){
-    return runSelected(move(processes),Policy::Priority,preemptive?"Priority-P":"Priority-NP",preemptive);
+SimulationResult runPriority(vector<Process> processes,bool preemptive,Time contextSwitchCost){
+    return runSelected(move(processes),Policy::Priority,preemptive?"Priority-P":"Priority-NP",contextSwitchCost,preemptive);
 }
 
 namespace{
-SimulationResult runQueued(vector<Process> processes,Time quantum,bool mlfq){
+SimulationResult runQueued(vector<Process> processes,Time quantum,bool mlfq,Time cost){
     if(quantum<=0)throw invalid_argument("quantum must be positive");
-    auto ans=prepare(move(processes),mlfq?"MLFQ":"RR");
+    auto ans=prepare(move(processes),mlfq?"MLFQ":"RR",cost);
     auto order=arrivalOrder(ans.processes);
     deque<int>q[3];
     vector<Time>budget(ans.processes.size(),quantum);
@@ -149,8 +164,12 @@ SimulationResult runQueued(vector<Process> processes,Time quantum,bool mlfq){
             continue;
         }
         int ind=q[level].front();
+        switchProcess(ans,prev,ind,time,cost);
+        enqueueArrivals(ans.processes,order,pos,time,q[0]);
+        level=0;
+        while(q[level].empty())level++;
+        ind=q[level].front();
         q[level].pop_front();
-        if(prev!=-1&&prev!=ind)ans.contextSwitches++;
         Time duration=ans.processes[ind].remainingTime;
         if(level<2)duration=min(duration,budget[ind]);
         if(mlfq&&level>0&&pos<order.size()){
@@ -175,10 +194,10 @@ SimulationResult runQueued(vector<Process> processes,Time quantum,bool mlfq){
 }
 }
 
-SimulationResult runRoundRobin(vector<Process> processes,Time quantum){
-    return runQueued(move(processes),quantum,false);
+SimulationResult runRoundRobin(vector<Process> processes,Time quantum,Time contextSwitchCost){
+    return runQueued(move(processes),quantum,false,contextSwitchCost);
 }
 
-SimulationResult runMLFQ(vector<Process> processes){
-    return runQueued(move(processes),2,true);
+SimulationResult runMLFQ(vector<Process> processes,Time contextSwitchCost){
+    return runQueued(move(processes),2,true,contextSwitchCost);
 }
